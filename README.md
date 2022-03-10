@@ -1,6 +1,4 @@
-# `k`: Kinematics library for rust-lang
-
- ![Build and Test](https://github.com/openrr/k/workflows/Rust/badge.svg) [![crates.io](https://img.shields.io/crates/v/k.svg)](https://crates.io/crates/k) [![codecov](https://codecov.io/gh/openrr/k/branch/main/graph/badge.svg?token=A0MGJ1V6US)](https://codecov.io/gh/openrr/k) [![docs](https://docs.rs/k/badge.svg)](https://docs.rs/k)
+# `k`: Kinematics library for rust-lang [![Build Status](https://travis-ci.org/OTL/k.svg?branch=master)](https://travis-ci.org/OTL/k) [![crates.io](https://img.shields.io/crates/v/k.svg)](https://crates.io/crates/k)
 
 `k` has below functionalities.
 
@@ -12,7 +10,7 @@
 
 See [Document](http://docs.rs/k) and examples/ for more details.
 
-API is unstable.
+API is unstable. 
 
 ## Requirements to build examples
 
@@ -65,7 +63,7 @@ fn main() {
     target.translation.vector.z += 0.1;
 
     // Create IK solver with default settings
-    let solver = k::JacobianIkSolver::default();
+    let solver = k::JacobianIKSolver::default();
 
     // Create a set of joints from end joint
     let arm = k::SerialChain::from_end(target_link);
