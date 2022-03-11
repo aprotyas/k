@@ -23,10 +23,6 @@
 //!
 //! See `Chain` as the top level interface.
 //!
-
-#[cfg(doctest)]
-doc_comment::doctest!("../README.md");
-
 mod chain;
 mod errors;
 mod funcs;
@@ -51,7 +47,4 @@ pub use self::node::{Node, NodeBuilder};
 // include Real for backwards compatibility purposes
 // (na::Real used to be the name, so we used to re-export k::Real)
 pub use na::{Isometry3, RealField as Real, RealField, Translation3, UnitQuaternion, Vector3};
-// export everything
-pub use nalgebra;
-pub use simba;
 pub use simba::scalar::{SubsetOf, SupersetOf};

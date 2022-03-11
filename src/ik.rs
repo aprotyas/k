@@ -15,8 +15,6 @@
 */
 use na::{DVector, Isometry3, RealField, Vector3, Vector6};
 use nalgebra as na;
-#[cfg(feature = "serde-serialize")]
-use serde::{Deserialize, Serialize};
 use simba::scalar::SubsetOf;
 
 use super::chain::*;
@@ -58,7 +56,6 @@ where
 
 /// A bundle of flags determining which coordinates are constrained for a target
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 pub struct Constraints {
     /// true means the constraint is used.
     ///  The coordinates is the world, not the end of the arm.
@@ -124,7 +121,7 @@ where
 }
 
 /// Inverse Kinematics Solver using Jacobian matrix
-pub struct JacobianIkSolver<T: RealField> {
+pub struct JacobianIKSolver<T: RealField> {
     /// If the distance is smaller than this value, it is reached.
     pub allowable_target_distance: T,
     /// If the angle distance is smaller than this value, it is reached.
@@ -134,29 +131,29 @@ pub struct JacobianIkSolver<T: RealField> {
     /// How many times the joints are tried to be moved
     pub num_max_try: usize,
     /// Nullspace function for a redundant system
-    nullspace_function: Option<Box<dyn Fn(&[T]) -> Vec<T> + Send + Sync>>,
+    nullspace_function: Option<Box<dyn Fn(&[T]) -> Vec<T>>>,
 }
 
-impl<T> JacobianIkSolver<T>
+impl<T> JacobianIKSolver<T>
 where
     T: RealField + SubsetOf<f64>,
 {
-    /// Create instance of `JacobianIkSolver`.
+    /// Create instance of `JacobianIKSolver`.
     ///
-    ///  `JacobianIkSolverBuilder` is available instead of calling this `new` method.
+    ///  `JacobianIKSolverBuilder` is available instead of calling this `new` method.
     ///
     /// # Examples
     ///
     /// ```
-    /// let solver = k::JacobianIkSolver::new(0.01, 0.01, 0.5, 100);
+    /// let solver = k::JacobianIKSolver::new(0.01, 0.01, 0.5, 100);
     /// ```
     pub fn new(
         allowable_target_distance: T,
         allowable_target_angle: T,
         jacobian_multiplier: T,
         num_max_try: usize,
-    ) -> JacobianIkSolver<T> {
-        JacobianIkSolver {
+    ) -> JacobianIKSolver<T> {
+        JacobianIKSolver {
             allowable_target_distance,
             allowable_target_angle,
             jacobian_multiplier,
@@ -169,7 +166,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// let mut solver = k::JacobianIkSolver::new(0.01, 0.01, 0.5, 100);
+    /// let mut solver = k::JacobianIKSolver::new(0.01, 0.01, 0.5, 100);
     /// solver.set_nullspace_function(Box::new(
     /// k::create_reference_positions_nullspace_function(
     ///    vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -177,7 +174,7 @@ where
     ///    ),
     /// ));
     /// ```
-    pub fn set_nullspace_function(&mut self, func: Box<dyn Fn(&[T]) -> Vec<T> + Send + Sync>) {
+    pub fn set_nullspace_function(&mut self, func: Box<dyn Fn(&[T]) -> Vec<T>>) {
         self.nullspace_function = Some(func);
     }
 
@@ -285,8 +282,8 @@ where
         arm.set_joint_positions(&orig_positions)?;
         Err(Error::NotConvergedError {
             num_tried: self.num_max_try,
-            position_diff: na::try_convert(last_target_distance.unwrap().0).unwrap_or_default(),
-            rotation_diff: na::try_convert(last_target_distance.unwrap().1).unwrap_or_default(),
+            position_diff: na::convert(last_target_distance.unwrap().0),
+            rotation_diff: na::convert(last_target_distance.unwrap().1),
         })
     }
 }
@@ -316,7 +313,7 @@ where
     (len_diff, rot_diff)
 }
 
-impl<T> InverseKinematicsSolver<T> for JacobianIkSolver<T>
+impl<T> InverseKinematicsSolver<T> for JacobianIKSolver<T>
 where
     T: RealField + SubsetOf<f64>,
 {
@@ -347,7 +344,7 @@ where
     /// target.translation.vector.x -= 0.1;
     ///
     /// // Create IK solver with default settings
-    /// let solver = k::JacobianIkSolver::default();
+    /// let solver = k::JacobianIKSolver::default();
     ///
     /// // solve and move the manipulator positions
     /// solver.solve(&arm, &target).unwrap();
@@ -376,7 +373,7 @@ where
     /// arm.set_joint_positions(&positions).unwrap();
     /// let mut target = arm.update_transforms().last().unwrap().clone();
     /// target.translation.vector.x -= 0.1;
-    /// let solver = k::JacobianIkSolver::default();
+    /// let solver = k::JacobianIKSolver::default();
     ///
     /// let mut constraints = k::Constraints::default();
     /// constraints.rotation_x = false;
@@ -402,7 +399,7 @@ where
     }
 }
 
-impl<T> Default for JacobianIkSolver<T>
+impl<T> Default for JacobianIKSolver<T>
 where
     T: RealField + SubsetOf<f64>,
 {

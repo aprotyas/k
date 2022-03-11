@@ -17,16 +17,17 @@
 use na::{Isometry3, RealField, Translation3, UnitQuaternion};
 use nalgebra as na;
 use simba::scalar::SubsetOf;
+use std::cell::{Ref, RefCell};
 use std::fmt::{self, Display};
 use std::ops::Deref;
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::rc::{Rc, Weak};
 
 use super::errors::*;
 use super::iterator::*;
 use super::joint::*;
 use super::link::*;
 
-type WeakNode<T> = Weak<Mutex<NodeImpl<T>>>;
+type WeakNode<T> = Weak<RefCell<NodeImpl<T>>>;
 
 #[derive(Debug)]
 /// Node for joint tree struct
@@ -47,18 +48,18 @@ where
 ///
 /// It contains joint, joint (transform), and parent/children.
 #[derive(Debug)]
-pub struct Node<T: RealField>(pub(crate) Arc<Mutex<NodeImpl<T>>>);
+pub struct Node<T: RealField>(pub(crate) Rc<RefCell<NodeImpl<T>>>);
 
 impl<T> Node<T>
 where
     T: RealField + SubsetOf<f64>,
 {
-    pub(crate) fn from_rc(arc_mutex_node: Arc<Mutex<NodeImpl<T>>>) -> Self {
-        Node(arc_mutex_node)
+    pub(crate) fn from_rc(rc: Rc<RefCell<NodeImpl<T>>>) -> Self {
+        Node(rc)
     }
 
     pub fn new(joint: Joint<T>) -> Self {
-        Node::<T>(Arc::new(Mutex::new(NodeImpl {
+        Node::<T>(Rc::new(RefCell::new(NodeImpl {
             parent: None,
             children: Vec::new(),
             joint,
@@ -69,20 +70,27 @@ where
         })))
     }
 
-    pub(crate) fn lock(&self) -> MutexGuard<NodeImpl<T>> {
-        self.0.lock().unwrap()
-    }
-
     pub fn joint(&self) -> JointRefGuard<T> {
-        JointRefGuard { guard: self.lock() }
+        JointRefGuard {
+            guard: self.0.borrow(),
+        }
     }
 
     pub fn joint_position(&self) -> Option<T> {
-        self.lock().joint.joint_position()
+        self.0.borrow().joint.joint_position()
     }
+    /*
 
+        pub fn joint_mut(&self) -> JointRefGuardMut<T> {
+            JointRefGuardMut {
+                guard: self.0.borrow_mut(),
+            }
+        }
+    */
+
+    //pub fn parent(&self) -> ParentRefGuard<T> {
     pub fn parent(&self) -> Option<Node<T>> {
-        match self.lock().parent {
+        match self.0.borrow().parent {
             Some(ref weak) => weak
                 .upgrade()
                 .and_then(|rc| Some(Node::from_rc(rc.clone()))),
@@ -91,7 +99,9 @@ where
     }
 
     pub fn children(&self) -> ChildrenRefGuard<T> {
-        ChildrenRefGuard { guard: self.lock() }
+        ChildrenRefGuard {
+            guard: self.0.borrow(),
+        }
     }
 
     /// iter from the end to root, it contains nodes[id] itself
@@ -107,14 +117,14 @@ where
 
     /// Set parent and child relations at same time
     pub fn set_parent(&self, parent: &Node<T>) {
-        self.lock().parent = Some(Arc::downgrade(&parent.0));
-        parent.0.lock().unwrap().children.push(self.clone());
+        self.0.borrow_mut().parent = Some(Rc::downgrade(&parent.0));
+        parent.0.borrow_mut().children.push(self.clone());
     }
 
     /// Remove parent and child relations at same time
     pub fn remove_parent(&self, parent: &Node<T>) {
-        self.lock().parent = None;
-        parent.0.lock().unwrap().children.retain(|x| *x != *self);
+        self.0.borrow_mut().parent = None;
+        parent.0.borrow_mut().children.retain(|x| *x != *self);
     }
 
     /// # Examples
@@ -129,7 +139,7 @@ where
     /// assert!(!l1.is_root());
     /// ```
     pub fn is_root(&self) -> bool {
-        self.lock().parent.is_none()
+        self.0.borrow().parent.is_none()
     }
 
     /// # Examples
@@ -142,19 +152,13 @@ where
     /// assert!(l1.is_end());
     /// ```
     pub fn is_end(&self) -> bool {
-        self.0.lock().unwrap().children.is_empty()
+        self.0.borrow().children.is_empty()
     }
 
     /// Set the origin transform of the joint
     #[inline]
     pub fn set_origin(&self, trans: Isometry3<T>) {
-        self.lock().joint.set_origin(trans);
-    }
-
-    /// Get the origin transform of the joint
-    #[inline]
-    pub fn origin(&self) -> Isometry3<T> {
-        self.joint().origin().clone()
+        self.0.borrow_mut().joint.set_origin(trans);
     }
 
     /// Set the position (angle) of the joint
@@ -203,13 +207,13 @@ where
     /// assert_eq!(j1.joint_position().unwrap(), 1.6);
     /// ```
     pub fn set_joint_position(&self, position: T) -> Result<(), Error> {
-        let mut node = self.lock();
+        let mut node = self.0.borrow_mut();
         if node.mimic_parent.is_some() {
             return Ok(());
         }
         node.joint.set_joint_position(position)?;
         for child in &node.mimic_children {
-            let mut child_node = child.lock();
+            let mut child_node = child.0.borrow_mut();
             let mimic = child_node.mimic.clone();
             match mimic {
                 Some(m) => child_node
@@ -247,8 +251,7 @@ where
     /// ```
     pub fn set_joint_position_clamped(&self, position: T) {
         self.0
-            .lock()
-            .unwrap()
+            .borrow_mut()
             .joint
             .set_joint_position_clamped(position);
     }
@@ -256,8 +259,7 @@ where
     #[inline]
     pub fn set_joint_position_unchecked(&self, position: T) {
         self.0
-            .lock()
-            .unwrap()
+            .borrow_mut()
             .joint
             .set_joint_position_unchecked(position);
     }
@@ -307,15 +309,15 @@ where
     /// // _poses[1] is as same as l1.world_transform()
     #[inline]
     pub fn world_transform(&self) -> Option<Isometry3<T>> {
-        self.joint().world_transform()
+        self.0.borrow().joint.world_transform()
     }
     #[inline]
     pub fn world_velocity(&self) -> Option<Velocity<T>> {
-        self.joint().world_velocity()
+        self.0.borrow().joint.world_velocity()
     }
 
     pub fn mimic_parent(&self) -> Option<Node<T>> {
-        match self.lock().mimic_parent {
+        match self.0.borrow().mimic_parent {
             Some(ref weak) => weak
                 .upgrade()
                 .and_then(|rc| Some(Node::from_rc(rc.clone()))),
@@ -324,17 +326,19 @@ where
     }
 
     pub fn set_mimic_parent(&self, parent: &Node<T>, mimic: Mimic<T>) {
-        self.lock().mimic_parent = Some(Arc::downgrade(&parent.0));
-        parent.lock().mimic_children.push(self.clone());
-        self.lock().mimic = Some(mimic);
+        self.0.borrow_mut().mimic_parent = Some(Rc::downgrade(&parent.0));
+        parent.0.borrow_mut().mimic_children.push(self.clone());
+        self.0.borrow_mut().mimic = Some(mimic);
     }
 
     pub fn set_link(&self, link: Option<Link<T>>) {
-        self.lock().link = link;
+        self.0.borrow_mut().link = link;
     }
 
     pub fn link(&self) -> OptionLinkRefGuard<T> {
-        OptionLinkRefGuard { guard: self.lock() }
+        OptionLinkRefGuard {
+            guard: self.0.borrow(),
+        }
     }
 }
 
@@ -352,13 +356,13 @@ where
     T: RealField,
 {
     fn eq(&self, other: &Node<T>) -> bool {
-        &*self.0 as *const Mutex<NodeImpl<T>> == &*other.0 as *const Mutex<NodeImpl<T>>
+        &*self.0 as *const RefCell<NodeImpl<T>> == &*other.0 as *const RefCell<NodeImpl<T>>
     }
 }
 
-impl<T: RealField + SubsetOf<f64>> Display for Node<T> {
+impl<T: RealField> Display for Node<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let inner = self.lock();
+        let inner = self.0.borrow();
         inner.joint.fmt(f)?;
 
         if let Some(l) = &inner.link {
@@ -383,7 +387,7 @@ macro_rules! def_ref_guard {
         where
             T: RealField,
         {
-            guard: MutexGuard<'a, NodeImpl<T>>,
+            guard: Ref<'a, NodeImpl<T>>,
         }
 
         impl<'a, T> Deref for $guard_struct<'a, T>
@@ -440,7 +444,7 @@ pub struct LinkRefGuard<'a, T>
 where
     T: RealField,
 {
-    pub(crate) guard: MutexGuard<'a, NodeImpl<T>>,
+    pub(crate) guard: Ref<'a, NodeImpl<T>>,
 }
 
 impl<'a, T> Deref for LinkRefGuard<'a, T>
@@ -577,7 +581,7 @@ where
 /// set parents easily
 ///
 /// ```
-/// use k::connect;
+/// #[macro_use] extern crate k;
 /// # fn main() {
 /// let l0 = k::NodeBuilder::<f64>::new().into_node();
 /// let l1 = k::NodeBuilder::new().into_node();
@@ -601,6 +605,6 @@ macro_rules! connect {
     };
     ($x:expr => $y:expr => $($rest:tt)+) => {
         $y.set_parent(&$x);
-        $crate::connect!($y => $($rest)*);
+        connect!($y => $($rest)*);
     };
 }

@@ -67,8 +67,8 @@ where
     fn from(urdf_material: urdf_rs::Material) -> Self {
         Material {
             name: urdf_material.name,
-            color: urdf_material.color.unwrap_or_default().into(),
-            texture: urdf_material.texture.unwrap_or_default().into(),
+            color: urdf_material.color.into(),
+            texture: urdf_material.texture.into(),
         }
     }
 }
@@ -110,10 +110,10 @@ where
 {
     fn from(urdf_visual: urdf_rs::Visual) -> Self {
         Visual::new(
-            urdf_visual.name.unwrap_or_default(),
+            urdf_visual.name,
             isometry_from(&urdf_visual.origin),
             urdf_visual.geometry.into(),
-            urdf_visual.material.unwrap_or_default().into(),
+            urdf_visual.material.into(),
         )
     }
 }
@@ -124,7 +124,7 @@ where
 {
     fn from(urdf_collision: urdf_rs::Collision) -> Self {
         Collision::new(
-            urdf_collision.name.unwrap_or_default(),
+            urdf_collision.name,
             isometry_from(&urdf_collision.origin),
             urdf_collision.geometry.into(),
         )
@@ -153,17 +153,14 @@ where
             urdf_rs::Geometry::Sphere { radius } => Geometry::Sphere {
                 radius: na::convert(radius),
             },
-            urdf_rs::Geometry::Mesh { filename, scale } => {
-                let scale = scale.unwrap_or(DEFAULT_MESH_SCALE);
-                Geometry::Mesh {
-                    filename,
-                    scale: na::Vector3::new(
-                        na::convert(scale[0]),
-                        na::convert(scale[1]),
-                        na::convert(scale[2]),
-                    ),
-                }
-            }
+            urdf_rs::Geometry::Mesh { filename, scale } => Geometry::Mesh {
+                filename,
+                scale: na::Vector3::new(
+                    na::convert(scale[0]),
+                    na::convert(scale[1]),
+                    na::convert(scale[2]),
+                ),
+            },
         }
     }
 }
@@ -188,9 +185,8 @@ where
 {
     fn from(urdf_mimic: &urdf_rs::Mimic) -> Self {
         Mimic::new(
-            // https://github.com/openrr/urdf-rs/pull/3/files#diff-0fb2eeea3273a4c9b3de69ee949567f546dc8c06b1e190336870d00b54ea0979L244-L245
-            na::convert(urdf_mimic.multiplier.unwrap_or(1.0)),
-            na::convert(urdf_mimic.offset.unwrap_or_default()),
+            na::convert(urdf_mimic.multiplier),
+            na::convert(urdf_mimic.offset),
         )
     }
 }
@@ -299,13 +295,13 @@ where
         }
         // add mimics
         for j in &robot.joints {
-            if let Some(mimic) = &j.mimic {
-                debug!("mimic found for {}", mimic.joint);
+            if j.mimic.joint != "" {
+                debug!("mimic found for {}", j.mimic.joint);
                 let child = joint_name_to_node[&j.name].clone();
                 let parent = joint_name_to_node
-                    .get(&mimic.joint)
-                    .unwrap_or_else(|| panic!("{} not found, mimic not found", &mimic.joint));
-                child.set_mimic_parent(parent, mimic.into());
+                    .get(&j.mimic.joint)
+                    .unwrap_or_else(|| panic!("{} not found, mimic not found", &j.mimic.joint));
+                child.set_mimic_parent(parent, (&j.mimic).into());
             }
         }
         // set root as parent of root joint nodes
@@ -337,7 +333,7 @@ where
     where
         P: AsRef<Path>,
     {
-        Ok(urdf_rs::utils::read_urdf_or_xacro(path)?.into())
+        Ok(urdf_rs::read_file(path)?.into())
     }
 }
 
@@ -350,6 +346,9 @@ where
 /// # Examples
 ///
 /// ```
+/// extern crate urdf_rs;
+/// extern crate k;
+///
 /// let urdf_robot = urdf_rs::read_file("urdf/sample.urdf").unwrap();
 /// let map = k::urdf::link_to_joint_map(&urdf_robot);
 /// assert_eq!(map.get("root_body").unwrap(), k::urdf::ROOT_JOINT_NAME);
@@ -381,9 +380,6 @@ pub fn joint_to_link_map(urdf_robot: &urdf_rs::Robot) -> HashMap<String, String>
     }
     map
 }
-
-// https://github.com/openrr/urdf-rs/pull/3/files#diff-0fb2eeea3273a4c9b3de69ee949567f546dc8c06b1e190336870d00b54ea0979L36-L38
-const DEFAULT_MESH_SCALE: [f64; 3] = [1.0f64; 3];
 
 #[test]
 fn test_tree() {

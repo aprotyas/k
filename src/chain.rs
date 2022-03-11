@@ -27,6 +27,7 @@ use std::ops::Deref;
 /// # Examples
 ///
 /// ```
+/// #[macro_use]
 /// use k::*;
 /// use k::prelude::*;
 ///
@@ -127,9 +128,17 @@ impl<T: RealField + SubsetOf<f64>> Chain<T> {
     #[allow(clippy::needless_pass_by_value)]
     pub fn from_root(root_joint: Node<T>) -> Self {
         let nodes = root_joint.iter_descendants().collect::<Vec<_>>();
-        Self::from_nodes(nodes)
+        let movable_nodes = nodes
+            .iter()
+            .filter(|joint| joint.joint().is_movable())
+            .cloned()
+            .collect::<Vec<_>>();
+        Chain {
+            dof: movable_nodes.len(),
+            nodes,
+            movable_nodes,
+        }
     }
-
     /// Create `Chain` from end joint. It has any branches.
     ///
     /// Do not discard root joint before create Chain.
@@ -153,25 +162,6 @@ impl<T: RealField + SubsetOf<f64>> Chain<T> {
     pub fn from_end(end_joint: &Node<T>) -> Chain<T> {
         let mut nodes = end_joint.iter_ancestors().collect::<Vec<_>>();
         nodes.reverse();
-        Self::from_nodes(nodes)
-    }
-
-    /// Create `Chain` from nodes.
-    ///
-    /// This method is public, but it is for professional use.
-    ///
-    /// # Examples
-    ///
-    ///
-    /// ```
-    /// use k::*;
-    ///
-    /// let l0 = Node::new(Joint::new("fixed0", JointType::Fixed));
-    /// let l1 = Node::new(Joint::new("fixed1", JointType::Fixed));
-    /// l1.set_parent(&l0);
-    /// let chain = Chain::<f64>::from_nodes(vec![l0, l1]);
-    /// ```
-    pub fn from_nodes(nodes: Vec<Node<T>>) -> Chain<T> {
         let movable_nodes = nodes
             .iter()
             .filter(|joint| joint.joint().is_movable())
@@ -183,68 +173,6 @@ impl<T: RealField + SubsetOf<f64>> Chain<T> {
             nodes,
         }
     }
-
-    /// Create `Chain` from end node and root node, without any branches.
-    /// The root node is included in the chain.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use k::*;
-    ///
-    /// let l0 = Node::new(Joint::new("fixed0", JointType::Fixed));
-    /// let l1 = Node::new(Joint::new("fixed1", JointType::Fixed));
-    /// let l2 = Node::new(Joint::new("fixed2", JointType::Fixed));
-    /// let l3 = Node::new(Joint::new("fixed3", JointType::Fixed));
-    /// l1.set_parent(&l0);
-    /// l2.set_parent(&l1);
-    /// l3.set_parent(&l2);
-    /// let chain = Chain::<f32>::from_end_to_root(&l2, &l1);
-    ///
-    /// assert!(chain.find("fixed0").is_none()); // not included
-    /// assert!(chain.find("fixed1").is_some());
-    /// assert!(chain.find("fixed2").is_some());
-    /// assert!(chain.find("fixed3").is_none()); // not included
-    /// ```
-    pub fn from_end_to_root(end_joint: &Node<T>, root_joint: &Node<T>) -> Chain<T> {
-        let mut nodes = Vec::new();
-        for n in end_joint.iter_ancestors() {
-            nodes.push(n.clone());
-            if n == *root_joint {
-                break;
-            }
-        }
-        nodes.reverse();
-        Self::from_nodes(nodes)
-    }
-
-    /// Set the `Chain`'s origin
-    ///
-    /// # Examples
-    ///
-    ///
-    /// ```
-    /// use k::*;
-    ///
-    /// let l0 = Node::new(Joint::new("fixed0", JointType::Fixed));
-    /// let l1 = Node::new(Joint::new("fixed1", JointType::Fixed));
-    /// l1.set_parent(&l0);
-    /// let c = Chain::<f32>::from_end(&l1);
-    /// let mut o = c.origin();
-    /// assert!(o.translation.vector[0].abs() < 0.000001);
-    /// o.translation.vector[0] = 1.0;
-    /// c.set_origin(o);
-    /// assert!((o.translation.vector[0] - 1.0).abs() < 0.000001);
-    /// ```
-    pub fn set_origin(&self, pose: na::Isometry3<T>) {
-        self.nodes[0].set_origin(pose)
-    }
-
-    /// Get the `Chain`'s origin
-    pub fn origin(&self) -> na::Isometry3<T> {
-        self.nodes[0].origin()
-    }
-
     /// Iterate for all joint nodes
     ///
     /// The order is from parent to children. You can assume that parent is already iterated.
@@ -278,8 +206,10 @@ impl<T: RealField + SubsetOf<f64>> Chain<T> {
     /// Iterate for links
     pub fn iter_links(&self) -> impl Iterator<Item = LinkRefGuard<T>> {
         self.nodes.iter().filter_map(|node| {
-            if node.link().is_some() {
-                Some(LinkRefGuard { guard: node.lock() })
+            if node.0.borrow().link.is_some() {
+                Some(LinkRefGuard {
+                    guard: node.0.borrow(),
+                })
             } else {
                 None
             }
@@ -441,7 +371,7 @@ impl<T: RealField + SubsetOf<f64>> Chain<T> {
         self.update_transforms();
         self.iter().for_each(|node| {
             let parent_transform = node.parent_world_transform().expect("cache must exist");
-            let mut node_mut = node.lock();
+            let mut node_mut = node.0.borrow_mut();
             if let Some(ref mut link) = node_mut.link {
                 let inertial_trans = parent_transform * link.inertial.origin();
                 link.inertial.set_world_transform(inertial_trans);
@@ -493,7 +423,7 @@ where
                 let parent_index = self.nodes.iter().position(|x| *x == m).unwrap();
                 new_nodes[i].set_mimic_parent(
                     &new_nodes[parent_index],
-                    self.nodes[i].lock().mimic.clone().unwrap(),
+                    self.nodes[i].0.borrow().mimic.clone().unwrap(),
                 );
             }
         }
@@ -568,27 +498,6 @@ where
             inner: Chain::from_end(end_joint),
         }
     }
-
-    /// Create SerialChain from the end `Node` and root `Node`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let node0 = k::NodeBuilder::<f32>::new().into_node();
-    /// let node1 = k::NodeBuilder::<f32>::new().into_node();
-    /// let node2 = k::NodeBuilder::<f32>::new().into_node();
-    /// let node3 = k::NodeBuilder::<f32>::new().into_node();
-    /// use k::connect;
-    /// connect![node0 => node1 => node2 => node3];
-    /// let s_chain = k::SerialChain::from_end_to_root(&node2, &node1);
-    /// assert_eq!(s_chain.iter().count(), 2);
-    /// ```
-    pub fn from_end_to_root(end_joint: &Node<T>, root_joint: &Node<T>) -> SerialChain<T> {
-        SerialChain {
-            inner: Chain::from_end_to_root(end_joint, root_joint),
-        }
-    }
-
     /// Safely unwrap and returns inner `Chain` instance
     pub fn unwrap(self) -> Chain<T> {
         self.inner
